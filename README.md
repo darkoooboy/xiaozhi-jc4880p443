@@ -140,3 +140,5 @@ main/
 
 当前进度图片
 <img width="522" height="858" alt="image" src="https://github.com/user-attachments/assets/8ed4c5e6-406d-4fcf-a843-700d553d77c2" />
+按下BOOT键盘，触摸屏幕可串口输出当前坐标
+<img width="479" height="454" alt="image" src="https://github.com/user-attachments/assets/e1b57993-83df-4d45-95fa-6561921f02ee" />
