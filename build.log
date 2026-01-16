@@ -1,0 +1,4 @@
+Usage: idf.py build [OPTIONS]
+Try 'idf.py build --help' for help.
+
+Error: No such option: -v
