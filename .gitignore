@@ -1,0 +1,52 @@
+# 构建目录
+build/
+cmake-build-*/
+
+# 编译生成的文件
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.o
+*.a
+*.so
+*.d
+*.su
+
+# IDE相关
+.vscode/
+.idea/
+*.swp
+*~
+
+# 平台IO
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/c_cpp_properties.json
+
+# ESP-IDF特定
+sdkconfig
+sdkconfig.old
+.project
+.cproject
+
+# 编译临时文件
+*.pyc
+__pycache__/
+
+# 日志文件
+*.log
+
+# 依赖目录
+dependencies/
+components/__pycache__/
+
+# 其他
+.DS_Store
+Thumbs.db
