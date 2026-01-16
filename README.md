@@ -138,3 +138,5 @@ main/
 | 点击卡片     | 打开应用 | 多媒体 / 相册       |
 | 点击 BOOT  | 坐标调试 | 串口输出 X / Y     |
 
+当前进度图片
+<img width="522" height="858" alt="image" src="https://github.com/user-attachments/assets/8ed4c5e6-406d-4fcf-a843-700d553d77c2" />
