@@ -2950,6 +2950,12 @@ CONFIG_ESP_HOSTED_TO_WIFI_DATA_THROTTLE_LOW_THRESHOLD=60
 # end of ESP-Hosted config
 
 #
+# ESP IO Expander
+#
+# CONFIG_IO_EXPANDER_ENABLE_GPIO_API_WRAPPER is not set
+# end of ESP IO Expander
+
+#
 # Espressif Image Process Algorithm Configuration
 #
 CONFIG_ESP_IPA_CONFIG_PARAM_VERSION=1

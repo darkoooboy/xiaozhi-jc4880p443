@@ -8,7 +8,7 @@
 #include <string>
 #include <functional>
 #include <network_interface.h>
-
+#include <driver/i2c_master.h>
 #include "led/led.h"
 #include "backlight.h"
 #include "camera.h"
@@ -73,6 +73,7 @@ public:
     virtual bool GetTemperature(float& esp32temp);
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
+    virtual i2c_master_bus_handle_t GetI2CBus() { return nullptr; }
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) { (void)callback; }
