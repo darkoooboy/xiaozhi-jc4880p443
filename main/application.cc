@@ -9,7 +9,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
-
+#include "sensors/sensor_manager.h"
 #include <cstring>
 #include <esp_log.h>
 #include <cJSON.h>
@@ -84,6 +84,12 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
     audio_service_.SetCallbacks(callbacks);
+
+    // =========== 建议添加的位置 ===========
+    // 启动环境传感器后台采集任务
+    #include "sensors/sensor_manager.h" // 确保文件顶部有此包含
+    SensorManager::GetInstance().Start();
+    // =====================================
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {

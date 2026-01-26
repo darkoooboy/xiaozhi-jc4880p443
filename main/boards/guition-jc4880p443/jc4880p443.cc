@@ -5,6 +5,7 @@
 #include "button.h"
 #include "config.h"
 #include "led/single_led.h"
+#include "sensors/sensor_manager.h" 
 
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -18,10 +19,11 @@
 #include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <cstring>
 
 #define TAG "jc4880p443"
 
-// LCD 厂商初始化序列
+// LCD 厂商初始化序列 (保持原样)
 static const st7701_lcd_init_cmd_t lcd_cmd[] = {
     {0xFF, (uint8_t []){0x77,0x01,0x00,0x00,0x13},5,0},
     {0xEF, (uint8_t []){0x08}, 1, 0},
@@ -70,6 +72,7 @@ private:
     Button boot_button_; 
     LcdDisplay *display__;
     esp_lcd_touch_handle_t touch_handle_ = nullptr;
+    bool test_mode_active_ = false;
 
     void InitializeCodecI2c() {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -94,19 +97,10 @@ private:
             .intr_type = GPIO_INTR_DISABLE,
         };
         gpio_config(&io_conf);
-
         gpio_set_level((gpio_num_t)LCD_TOUCH_RST, 0);
-        gpio_set_level((gpio_num_t)LCD_TOUCH_INT, 0);
         vTaskDelay(pdMS_TO_TICKS(50)); 
-        
-        gpio_set_level((gpio_num_t)LCD_TOUCH_INT, 1);
-        vTaskDelay(pdMS_TO_TICKS(5));
         gpio_set_level((gpio_num_t)LCD_TOUCH_RST, 1);
         vTaskDelay(pdMS_TO_TICKS(100));
-
-        gpio_set_direction((gpio_num_t)LCD_TOUCH_INT, GPIO_MODE_INPUT);
-        gpio_pullup_en((gpio_num_t)AUDIO_CODEC_I2C_SDA_PIN);
-        gpio_pullup_en((gpio_num_t)AUDIO_CODEC_I2C_SCL_PIN);
 
         const esp_lcd_touch_config_t tp_cfg = {
             .x_max = LCD_H_RES,
@@ -116,166 +110,105 @@ private:
             .levels = { .reset = 0, .interrupt = 0 },
             .flags = { .swap_xy = 0, .mirror_x = 0, .mirror_y = 0 },
         };
-
         esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
         tp_io_config.dev_addr = 0x5D;
         tp_io_config.scl_speed_hz = 100000; 
-
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
         if (esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle) == ESP_OK) {
             if (esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &touch_handle_) == ESP_OK) {
-                ESP_LOGI(TAG, "GT911 touch driver installed (0x5D)");
-            } else {
-                esp_lcd_panel_io_del(tp_io_handle);
-                ESP_LOGE(TAG, "GT911 touch init failed");
+                ESP_LOGI(TAG, "GT911 touch driver installed");
             }
         }
     }
 
+    void InitializeLCD() {
+        bsp_enable_dsi_phy_power();
+        esp_lcd_panel_io_handle_t io = NULL;
+        esp_lcd_panel_handle_t disp_panel = NULL;
+        esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
+        esp_lcd_dsi_bus_config_t bus_config = { .bus_id = 0, .num_data_lanes = LCD_MIPI_DSI_LANE_NUM, .phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT, .lane_bit_rate_mbps = 500 };
+        esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
+        esp_lcd_dbi_io_config_t dbi_config = { .virtual_channel = 0, .lcd_cmd_bits = 8, .lcd_param_bits = 8 };
+        esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io);
+        esp_lcd_dpi_panel_config_t dpi_config = { .virtual_channel = 0, .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT, .dpi_clock_freq_mhz = 34, .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565, .num_fbs = 2, .video_timing = { .h_size = 480, .v_size = 800, .hsync_pulse_width = 12, .hsync_back_porch = 42, .hsync_front_porch = 42, .vsync_pulse_width = 2, .vsync_back_porch = 8, .vsync_front_porch = 166 }, .flags={ .use_dma2d = true } };
+        st7701_vendor_config_t v_cfg = { .init_cmds = lcd_cmd, .init_cmds_size = sizeof(lcd_cmd)/sizeof(st7701_lcd_init_cmd_t), .mipi_config = { .dsi_bus = mipi_dsi_bus, .dpi_config = &dpi_config }, .flags = { .use_mipi_interface = 1 } };
+        const esp_lcd_panel_dev_config_t l_cfg = { .reset_gpio_num = PIN_NUM_LCD_RST, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB, .bits_per_pixel = 16, .vendor_config = &v_cfg };
+        esp_lcd_new_panel_st7701(io, &l_cfg, &disp_panel);
+        esp_lcd_panel_reset(disp_panel); esp_lcd_panel_init(disp_panel);
+        display__ = new MipiLcdDisplay(io, disp_panel, LCD_H_RES, LCD_V_RES, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY, touch_handle_);
+    }
+
     static esp_err_t bsp_enable_dsi_phy_power(void) {
         #if MIPI_DSI_PHY_PWR_LDO_CHAN > 0
-            static esp_ldo_channel_handle_t phy_pwr_chan = NULL;
-            esp_ldo_channel_config_t ldo_cfg = {
-                .chan_id = MIPI_DSI_PHY_PWR_LDO_CHAN,
-                .voltage_mv = MIPI_DSI_PHY_PWR_LDO_VOLTAGE_MV,
-            };
-            esp_ldo_acquire_channel(&ldo_cfg, &phy_pwr_chan);
-            ESP_LOGI(TAG, "MIPI DSI PHY Powered on");
+            static esp_ldo_channel_handle_t p_chan = NULL;
+            esp_ldo_channel_config_t l_cfg = { .chan_id = MIPI_DSI_PHY_PWR_LDO_CHAN, .voltage_mv = MIPI_DSI_PHY_PWR_LDO_VOLTAGE_MV };
+            esp_ldo_acquire_channel(&l_cfg, &p_chan);
         #endif
         return ESP_OK;
     }
 
-    void InitializeLCD() {
-        bsp_enable_dsi_phy_power();
-        
-        esp_lcd_panel_io_handle_t io = NULL;
-        esp_lcd_panel_handle_t disp_panel = NULL;
-        esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
-
-        esp_lcd_dsi_bus_config_t bus_config = {
-            .bus_id = 0,
-            .num_data_lanes = LCD_MIPI_DSI_LANE_NUM,
-            .phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
-            .lane_bit_rate_mbps = 500,
-        };
-        esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
-
-        esp_lcd_dbi_io_config_t dbi_config = {
-            .virtual_channel = 0,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-        };
-        esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io);
-
-        esp_lcd_dpi_panel_config_t dpi_config ={
-            .virtual_channel = 0, 
-            .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,  
-            .dpi_clock_freq_mhz = 34,                                             
-            .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,                    
-            .num_fbs = 2,                                 
-            .video_timing = {                             
-                .h_size = 480, .v_size = 800, 
-                .hsync_pulse_width = 12, .hsync_back_porch = 42, .hsync_front_porch = 42,   
-                .vsync_pulse_width = 2, .vsync_back_porch = 8, .vsync_front_porch = 166,                  
-            },                                            
-            .flags={ .use_dma2d = true }                      
-        };
-
-        st7701_vendor_config_t vendor_config = {
-            .init_cmds = lcd_cmd,
-            .init_cmds_size = sizeof(lcd_cmd) / sizeof(st7701_lcd_init_cmd_t),
-            .mipi_config = { .dsi_bus = mipi_dsi_bus, .dpi_config = &dpi_config },
-            .flags = { .use_mipi_interface = 1 }
-        };
-
-        const esp_lcd_panel_dev_config_t lcd_dev_config = {
-            .reset_gpio_num = PIN_NUM_LCD_RST,
-            .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-            .bits_per_pixel = 16,
-            .vendor_config = &vendor_config,
-        };
-        
-        esp_lcd_new_panel_st7701(io, &lcd_dev_config, &disp_panel);
-        esp_lcd_panel_reset(disp_panel);
-        esp_lcd_panel_init(disp_panel);
-
-        display__ = new MipiLcdDisplay(io, disp_panel, LCD_H_RES, LCD_V_RES,
-            DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, 
-            DISPLAY_SWAP_XY, touch_handle_); // 确保传入的是成员变量 touch_handle_
+    void RunTouchTest() {
+        if (touch_handle_ == nullptr) return;
+        uint16_t x[1], y[1], s[1]; uint8_t c;
+        while (test_mode_active_) {
+            esp_lcd_touch_read_data(touch_handle_);
+            if (esp_lcd_touch_get_coordinates(touch_handle_, x, y, s, &c, 1) && c > 0) {
+                printf("Touch: %d, %d\n", x[0], y[0]);
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
     }
 
     void InitializeButtons() {
-        // BOOT按键点击：打印触摸点坐标 (Debug) 或进入配网
-        boot_button_.OnClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
-            } else {
-                // 运行状态下点击打印当前坐标，用于验证驱动映射方向
-                if (touch_handle_ != nullptr) {
-                    uint16_t x[1], y[1];
-                    uint8_t count;
-                    esp_lcd_touch_read_data(touch_handle_);
-                    if (esp_lcd_touch_get_coordinates(touch_handle_, x, y, NULL, &count, 1)) {
-                        ESP_LOGI("TouchVerify", "手指按下! 坐标: X=%d, Y=%d", x[0], y[0]);
-                    } else {
-                        ESP_LOGW("TouchVerify", "屏幕未检测到触摸");
-                    }
-                }
-            }
-        });
-
-        // BOOT按键长按：持续 3 秒打印坐标，方便测试滑动
         boot_button_.OnLongPress([this]() {
-            ESP_LOGW("TouchVerify", "开启持续坐标监测 (3秒)...");
-            for (int i = 0; i < 30; i++) {
-                if (touch_handle_ != nullptr) {
-                    uint16_t x[1], y[1];
-                    uint8_t count;
-                    esp_lcd_touch_read_data(touch_handle_);
-                    if (esp_lcd_touch_get_coordinates(touch_handle_, x, y, NULL, &count, 1)) {
-                        ESP_LOGI("TouchVerify", "[实时轨迹] X=%d, Y=%d", x[0], y[0]);
-                    }
-                }
-                vTaskDelay(pdMS_TO_TICKS(100));
+            test_mode_active_ = !test_mode_active_;
+            if (test_mode_active_) {
+                ESP_LOGI(TAG, "Test mode activated - Printing sensor data:");
+                // 调用 SensorManager 打印环境传感器信息
+                SensorManager::GetInstance().PrintCurrentData();
+                
+                // 启动触摸测试任务
+                xTaskCreate([](void* p){ 
+                    ((jc4880p443*)p)->RunTouchTest(); 
+                    vTaskDelete(NULL); 
+                }, "tch_test", 4096, this, 5, NULL);
             }
-            ESP_LOGW("TouchVerify", "监测结束");
         });
     }
 
 public:
     jc4880p443() : boot_button_(BOOT_BUTTON_GPIO) {  
-        InitializeCodecI2c();
-        
-        // 先复位并初始化 GT911 硬件
+        InitializeCodecI2c(); 
         InitializeGT911(); 
-        
-        // 再初始化 LCD（此时 MipiLcdDisplay 就能拿到已经创建好的 touch_handle_ 了）
-        InitializeLCD();
-        
+        InitializeLCD(); 
         InitializeButtons();
         GetBacklight()->RestoreBrightness();
     }
 
-    esp_lcd_touch_handle_t GetTouchHandle() { return touch_handle_; }
+    virtual ~jc4880p443() = default;
 
-    virtual Led* GetLed() override {
-        static SingleLed led(BUILTIN_LED_GPIO);
-        return &led;
+    // 实现基类接口，暴露 I2C 总线给 SensorManager
+    virtual i2c_master_bus_handle_t GetI2CBus() override {
+        return codec_i2c_bus_;
+    }
+
+    virtual Led* GetLed() override { 
+        static SingleLed led(BUILTIN_LED_GPIO); 
+        return &led; 
     }
 
     virtual AudioCodec* GetAudioCodec() override {
-        static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
-        return &audio_codec;
+        static Es8311AudioCodec codec(codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE, AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN, AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+        return &codec;
     }
-    
-    virtual Display* GetDisplay() override { return display__; }
 
-    virtual Backlight* GetBacklight() override {
-        static PwmBacklight backlight(PIN_NUM_BK_LIGHT, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-        return &backlight;
+    virtual Display* GetDisplay() override { 
+        return display__; 
+    }
+
+    virtual Backlight* GetBacklight() override { 
+        static PwmBacklight bl(PIN_NUM_BK_LIGHT, DISPLAY_BACKLIGHT_OUTPUT_INVERT); 
+        return &bl; 
     }
 };
 

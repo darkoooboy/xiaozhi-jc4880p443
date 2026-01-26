@@ -114,4 +114,7 @@ ota_data_initial.bin
 test-results/
 coverage/
 *.gcda
-*.gcno
+*.gcno.DS_Store
+*.DS_Store
+**/.DS_Store
+dependencies.lock
